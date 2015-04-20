@@ -198,7 +198,8 @@ namespace rotg {
         MachOFile();
         ~MachOFile();
         
-        bool parse_macho(const macho_input_t *input);
+        bool parse_macho(const macho_input_t *input,const char* path);
+        bool MH_MAGIC_Function(void);
         bool parse_file(const char* path);
         
         uint64_t getOffset(const void* address);
@@ -278,8 +279,8 @@ namespace rotg {
         const char * getStringTable() const {
             return m_string_table;
         }
-        
     private:
+
         MachOFile operator=(MachOFile&);    // declare only, do not allow assign
         MachOFile(MachOFile&);              // declare only, do not allow copy
         

@@ -22,6 +22,21 @@
 
 #include "machofile.h"
 
+
+
+void hexify(unsigned char *data, uint32_t size){
+    while(size--)
+        printf("%02x", *data++);}
+
+void fcopy(FILE *f1, FILE *f2){
+    char            buffer[BUFSIZ];
+    size_t          n;
+    
+    while ((n = fread(buffer, sizeof(char), sizeof(buffer), f1)) > 0){
+        if (fwrite(buffer, sizeof(char), n, f2) != n)
+            printf("Error copying backup");}
+}
+
 namespace rotg {
     
     MachOFile::MachOFile()
@@ -1234,9 +1249,9 @@ namespace rotg {
     {
         return ((uint8_t*)address - (uint8_t*)m_input.data) + m_input.baseOffset;
     }
-    
+
     /* Parse a Mach-O header */
-    bool MachOFile::parse_macho(const macho_input_t *input) {
+    bool MachOFile::parse_macho(const macho_input_t *input,const char* path) {
         if (m_input.data == NULL) {
             m_input.data = input->data;
             m_input.length = input->length;
@@ -1248,18 +1263,75 @@ namespace rotg {
         if (magic == NULL) {
             return false;
         }
+        static int flag = 1;
         
-        switch (*magic) {
+        switch (*magic)
+        {
             case MH_CIGAM:
                 m_is_need_byteswap = true;
                 // Fall-through
                 
             case MH_MAGIC:
+            {
                 m_header_size = sizeof(*m_header);
                 m_header = (const struct mach_header*)macho_read(input->data, m_header_size);
                 if (m_header == NULL) {
                     return false;
                 }
+              
+                struct mach_header currentHeader;
+                FILE *fp;
+                
+                
+                if((fp = fopen(path, "rb+")) == NULL) {
+                    printf("Error, unable to open file\n");
+                    return EXIT_FAILURE;
+                }
+                if (flag) {
+                    flag = 0;
+                    FILE *fw;
+                    char fwName[80];
+                    char fwPrefix[5] = ".bak"; //app.bak
+                    
+                    strlcpy(fwName, path, strlen(path)+1);
+                    strcat(fwName, fwPrefix);
+                    
+                    if((fw = fopen(fwName, "wb")) == NULL)
+                    {return EXIT_FAILURE;}
+                    
+                    fseek(fp, 0, SEEK_SET); //set fp back to 0 to get full copy
+                    printf("\nbacking up application binary...\n");
+                    fcopy(fp, fw);
+                    fclose(fw);
+                    printf("\nbinary backed up to:\t%s\n", fwName);
+                    printf("\nmach_header:\t");
+                }
+                    
+                    printf("loading header\n");
+                    fseek(fp, (long)input->baseOffset, SEEK_SET);
+                    if((fread(&currentHeader, sizeof(currentHeader), 1, fp)) == (int)NULL)
+                    {
+                        printf("Error reading MACH-O header");
+                        return EXIT_FAILURE;
+                    }
+                    hexify((unsigned char *)&currentHeader,sizeof(currentHeader));
+                    printf("\noriginal flags:\t");
+                    hexify((unsigned char *)&currentHeader.flags, sizeof(currentHeader.flags));
+                    printf("\nDisabling ASLR/PIE ...\n");
+                    currentHeader.flags &= ~MH_PIE;//0x218085 &= 0x200000
+                    printf("new flags:\t");
+                    hexify((unsigned char *)&currentHeader.flags, sizeof(currentHeader.flags));
+                    
+                    fseek(fp, (long)input->baseOffset, SEEK_SET);
+                    if((fwrite(&currentHeader, sizeof(char), 28, fp)) == (int)NULL)
+                    {
+                        printf("Error writing to application file %s\n",path);
+                    }
+                    printf("\nASLR has been disabled for %s\n", path);
+
+                    fclose(fp);
+               
+            }
                 break;
                 
             case MH_CIGAM_64:
@@ -1275,6 +1347,57 @@ namespace rotg {
                 /* The 64-bit header is a direct superset of the 32-bit header */
                 m_header = (struct mach_header *)m_header64;
                 
+                struct mach_header currentHeader;
+                FILE *fp;
+                
+                
+                if((fp = fopen(path, "rb+")) == NULL) {
+                    printf("Error, unable to open file\n");
+                    return EXIT_FAILURE;
+                }
+                if (flag) {
+                    flag = 0;
+                    FILE *fw;
+                    char fwName[80];
+                    char fwPrefix[5] = ".bak"; //app.bak
+                    
+                    strlcpy(fwName, path, strlen(path)+1);
+                    strcat(fwName, fwPrefix);
+                    
+                    if((fw = fopen(fwName, "wb")) == NULL)
+                    {return EXIT_FAILURE;}
+                    
+                    fseek(fp, 0, SEEK_SET); //set fp back to 0 to get full copy
+                    printf("\nbacking up application binary...\n");
+                    fcopy(fp, fw);
+                    fclose(fw);
+                    printf("\nbinary backed up to:\t%s\n", fwName);
+                    printf("\nmach_header:\t");
+                }
+                
+                printf("loading header\n");
+                fseek(fp, (long)input->baseOffset, SEEK_SET);
+                if((fread(&currentHeader, sizeof(currentHeader), 1, fp)) == (int)NULL)
+                {
+                    printf("Error reading MACH-O header");
+                    return EXIT_FAILURE;
+                }
+                hexify((unsigned char *)&currentHeader,sizeof(currentHeader));
+                printf("\noriginal flags:\t");
+                hexify((unsigned char *)&currentHeader.flags, sizeof(currentHeader.flags));
+                printf("\nDisabling ASLR/PIE ...\n");
+                currentHeader.flags &= ~MH_PIE;//0x218085 &= 0x200000
+                printf("new flags:\t");
+                hexify((unsigned char *)&currentHeader.flags, sizeof(currentHeader.flags));
+                
+                fseek(fp, (long)input->baseOffset, SEEK_SET);
+                if((fwrite(&currentHeader, sizeof(char), 28, fp)) == (int)NULL)
+                {
+                    printf("Error writing to application file %s\n",path);
+                }
+                printf("\nASLR has been disabled for %s\n", path);
+                
+                fclose(fp);
                 m_is64bit = true;
                 break;
                 
@@ -1302,10 +1425,10 @@ namespace rotg {
          enum NXByteOrder byteorder;
          const char *description;
          } NXArchInfo;   (name = "armv7", cputype = 12, cpusubtype = 9, byteorder = NX_LittleEndian, description = "arm v7")*/
-        m_archInfo = NXGetArchInfoFromCpuType(read32(m_header->cputype), read32(m_header->cpusubtype));
+       // m_archInfo = NXGetArchInfoFromCpuType(read32(m_header->cputype), read32(m_header->cpusubtype));
         
         /* Parse the Mach-O load commands */
-        return parse_load_commands();
+        return 1;//parse_load_commands();
     }
 
     bool MachOFile::parse_file(const char* path)
@@ -1314,7 +1437,7 @@ namespace rotg {
         if (m_fd < 0) {
             return false;
         }
-        
+  
         struct stat stbuf;
         if (fstat(m_fd, &stbuf) != 0) {
             return false;
@@ -1330,7 +1453,7 @@ namespace rotg {
         m_isInputOwned = true;
 
         /* Parse */
-        return parse_macho(&m_input);
+        return parse_macho(&m_input,path);
     }
 
 }
